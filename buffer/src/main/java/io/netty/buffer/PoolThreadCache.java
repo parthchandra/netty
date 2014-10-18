@@ -17,6 +17,9 @@
 package io.netty.buffer;
 
 
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
+
 import java.nio.ByteBuffer;
 
 /**
@@ -28,8 +31,9 @@ import java.nio.ByteBuffer;
 final class PoolThreadCache {
     final PoolArena<byte[]> heapArena;
     final PoolArena<ByteBuffer> directArena;
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(PoolThreadCache.class);
 
-    // Hold the caches for the different size classes, which are tiny, small and normal.
+  // Hold the caches for the different size classes, which are tiny, small and normal.
     private final MemoryRegionCache<byte[]>[] tinySubPageHeapCaches;
     private final MemoryRegionCache<byte[]>[] smallSubPageHeapCaches;
     private final MemoryRegionCache<ByteBuffer>[] tinySubPageDirectCaches;
@@ -199,6 +203,29 @@ final class PoolThreadCache {
                 free(tinySubPageHeapCaches) +
                 free(smallSubPageHeapCaches) +
                 free(normalHeapCaches);
+    }
+
+    public String toString() {
+      StringBuilder s = new StringBuilder();
+      for (MemoryRegionCache<?> c: tinySubPageDirectCaches) {
+        s.append("Tiny Sub Page Direct Cache:").append(c.size()).append("\n");
+      }
+      for (MemoryRegionCache<?> c: smallSubPageDirectCaches) {
+      s.append("Small Sub Page Direct Cache:").append(c.size()).append("\n");
+      }
+      for (MemoryRegionCache<?> c: normalDirectCaches) {
+      s.append("Normal Direct Cache:").append(c.size()).append("\n");
+      }
+      for (MemoryRegionCache<?> c: tinySubPageHeapCaches) {
+      s.append("Tiny Sub Page Heap Cache:").append(c.size()).append("\n");
+      }
+      for (MemoryRegionCache<?> c: smallSubPageHeapCaches) {
+      s.append("Small Sub Page Heap Cache:").append(c.size()).append("\n");
+      }
+      for (MemoryRegionCache<?> c: normalHeapCaches) {
+        s.append("Normal Heap Cache:").append(c.size()).append("\n");
+      }
+      return s.toString();
     }
 
     private static int free(MemoryRegionCache<?>[] caches) {

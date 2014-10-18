@@ -20,6 +20,9 @@ import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 abstract class PoolArena<T> {
 
@@ -42,6 +45,8 @@ abstract class PoolArena<T> {
     private final PoolChunkList<T> qInit;
     private final PoolChunkList<T> q075;
     private final PoolChunkList<T> q100;
+
+  private ConcurrentMap<Long, DebugStackTrace> leakedBuffers = new ConcurrentHashMap<Long, DebugStackTrace>();
 
     // TODO: Test if adding padding helps under contention
     //private long pad0, pad1, pad2, pad3, pad4, pad5, pad6, pad7;
@@ -131,13 +136,18 @@ abstract class PoolArena<T> {
             if (isTiny(normCapacity)) { // < 512
                 if (cache.allocateTiny(this, buf, reqCapacity, normCapacity)) {
                     // was able to allocate out of the cache so move on
-                    return;
+                  leakedBuffers.put(buf.handle,
+                    new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+
+                  return;
                 }
                 tableIdx = tinyIdx(normCapacity);
                 table = tinySubpagePools;
             } else {
                 if (cache.allocateSmall(this, buf, reqCapacity, normCapacity)) {
                     // was able to allocate out of the cache so move on
+                  leakedBuffers.put(buf.handle,
+                    new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
                     return;
                 }
                 tableIdx = smallIdx(normCapacity);
@@ -152,20 +162,29 @@ abstract class PoolArena<T> {
                     long handle = s.allocate();
                     assert handle >= 0;
                     s.chunk.initBufWithSubpage(buf, handle, reqCapacity);
+                  leakedBuffers.put(buf.handle,
+                    new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
                     return;
                 }
             }
         } else if (normCapacity <= chunkSize) {
             if (cache.allocateNormal(this, buf, reqCapacity, normCapacity)) {
                 // was able to allocate out of the cache so move on
+              leakedBuffers.put(buf.handle,
+                new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
                 return;
             }
         } else {
             // Huge allocations are never served via the cache so just call allocateHuge
             allocateHuge(buf, reqCapacity);
+          leakedBuffers.put(buf.handle,
+            new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
             return;
         }
         allocateNormal(buf, reqCapacity, normCapacity);
+      leakedBuffers.put(buf.handle,
+        new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+      return;
     }
 
     private synchronized void allocateNormal(PooledByteBuf<T> buf, int reqCapacity, int normCapacity) {
@@ -188,6 +207,7 @@ abstract class PoolArena<T> {
     }
 
     void free(PoolChunk<T> chunk, long handle, int normCapacity) {
+      leakedBuffers.remove(handle);
         if (chunk.unpooled) {
             destroyChunk(chunk);
         } else {
@@ -372,6 +392,31 @@ abstract class PoolArena<T> {
         }
         buf.append(StringUtil.NEWLINE);
 
+      PoolThreadCache cache = parent.threadCache.get();
+      buf.append("Cached: \n").append(cache.toString()).append("\n");
+
+      if (!leakedBuffers.isEmpty()) {
+        StringBuffer sb = new StringBuffer();
+        sb.append("Memory Leak detected: ");
+        sb.append(leakedBuffers.size());
+        sb.append(" buffer(s) still allocated");
+        sb.append("\n");
+
+        for (DebugStackTrace t : leakedBuffers.values()) {
+          sb.append("\tAllocation of size: ");
+          sb.append(t.size);
+          sb.append(" bytes at stack location:\n");
+          for (StackTraceElement s : t.elements) {
+            sb.append("\t\t");
+            sb.append(s.toString());
+            sb.append("\n");
+          }
+        }
+        buf.append(sb.toString());
+      } else {
+        buf.append("All allocated buffers have been released.");
+      }
+
         return buf.toString();
     }
 
@@ -474,4 +519,57 @@ abstract class PoolArena<T> {
             }
         }
     }
+
+  public class DebugStackTrace {
+
+    private StackTraceElement[] elements;
+    private long size;
+    private ByteBuf byteBuf;
+
+    public DebugStackTrace(long size, ByteBuf byteBuf, StackTraceElement[] elements) {
+      super();
+      this.elements = elements;
+      this.byteBuf = byteBuf;
+      this.size = size;
+    }
+
+    public void addToString(StringBuffer sb) {
+      for (int i = 3; i < elements.length; i++) {
+        sb.append("\t\t");
+        sb.append(elements[i]);
+        sb.append("\n");
+      }
+    }
+
+    @Override
+    public int hashCode() {
+      final int prime = 31;
+      int result = 1;
+      result = prime * result + Arrays.hashCode(elements);
+//      result = prime * result + (int) (size ^ (size >>> 32));
+      return result;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (obj == null) {
+        return false;
+      }
+      if (getClass() != obj.getClass()) {
+        return false;
+      }
+      DebugStackTrace other = (DebugStackTrace) obj;
+      if (!Arrays.equals(elements, other.elements)) {
+        return false;
+      }
+      // weird equal where size doesn't matter for multimap purposes.
+//      if (size != other.size)
+//        return false;
+      return true;
+    }
+  }
+
 }
