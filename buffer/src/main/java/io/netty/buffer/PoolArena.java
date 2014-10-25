@@ -136,8 +136,10 @@ abstract class PoolArena<T> {
             if (isTiny(normCapacity)) { // < 512
                 if (cache.allocateTiny(this, buf, reqCapacity, normCapacity)) {
                     // was able to allocate out of the cache so move on
-                  leakedBuffers.put(buf.handle,
-                    new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+                  synchronized (this) {
+                    leakedBuffers.put(buf.handle,
+                      new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+                  }
 
                   return;
                 }
@@ -146,8 +148,10 @@ abstract class PoolArena<T> {
             } else {
                 if (cache.allocateSmall(this, buf, reqCapacity, normCapacity)) {
                     // was able to allocate out of the cache so move on
-                  leakedBuffers.put(buf.handle,
-                    new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+                  synchronized (this) {
+                    leakedBuffers.put(buf.handle,
+                      new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+                  }
                     return;
                 }
                 tableIdx = smallIdx(normCapacity);
@@ -170,20 +174,26 @@ abstract class PoolArena<T> {
         } else if (normCapacity <= chunkSize) {
             if (cache.allocateNormal(this, buf, reqCapacity, normCapacity)) {
                 // was able to allocate out of the cache so move on
-              leakedBuffers.put(buf.handle,
-                new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+              synchronized (this) {
+                leakedBuffers.put(buf.handle,
+                  new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+              }
                 return;
             }
         } else {
             // Huge allocations are never served via the cache so just call allocateHuge
             allocateHuge(buf, reqCapacity);
-          leakedBuffers.put(buf.handle,
-            new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+          synchronized (this) {
+            leakedBuffers.put(buf.handle,
+              new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+          }
             return;
         }
         allocateNormal(buf, reqCapacity, normCapacity);
-      leakedBuffers.put(buf.handle,
-        new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+      synchronized (this) {
+        leakedBuffers.put(buf.handle,
+          new DebugStackTrace(normCapacity, buf, Thread.currentThread().getStackTrace()));
+      }
       return;
     }
 

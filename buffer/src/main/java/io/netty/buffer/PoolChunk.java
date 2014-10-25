@@ -16,6 +16,10 @@
 
 package io.netty.buffer;
 
+import java.util.Arrays;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
 final class PoolChunk<T> {
     private static final int ST_UNUSED = 0;
     private static final int ST_BRANCH = 1;
@@ -42,7 +46,9 @@ final class PoolChunk<T> {
     PoolChunk<T> prev;
     PoolChunk<T> next;
 
-    // TODO: Test if adding padding helps under contention
+  private ConcurrentMap<Long, DebugStackTrace> leakedBuffers = new ConcurrentHashMap<Long, DebugStackTrace>();
+
+  // TODO: Test if adding padding helps under contention
     //private long pad0, pad1, pad2, pad3, pad4, pad5, pad6, pad7;
 
     PoolChunk(PoolArena<T> arena, T memory, int pageSize, int maxOrder, int pageShifts, int chunkSize) {
@@ -374,4 +380,57 @@ final class PoolChunk<T> {
         buf.append(')');
         return buf.toString();
     }
+
+  public class DebugStackTrace {
+
+    private StackTraceElement[] elements;
+    private long size;
+    private long memIdx;
+
+    public DebugStackTrace(long size, long memIdx, StackTraceElement[] elements) {
+      super();
+      this.elements = elements;
+      this.memIdx = memIdx;
+      this.size = size;
+    }
+
+    public void addToString(StringBuffer sb) {
+      sb.append("\tBuffer Size:").append(this.size).append(" at Memory Index: ").append(this.memIdx).append("\n");
+      for (int i = 3; i < elements.length; i++) {
+        sb.append("\t\t");
+        sb.append(elements[i]);
+        sb.append("\n");
+      }
+    }
+
+    @Override
+    public int hashCode() {
+      final int prime = 31;
+      int result = 1;
+      result = prime * result + Arrays.hashCode(elements);
+//      result = prime * result + (int) (size ^ (size >>> 32));
+      return result;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (obj == null) {
+        return false;
+      }
+      if (getClass() != obj.getClass()) {
+        return false;
+      }
+      DebugStackTrace other = (DebugStackTrace) obj;
+      if (!Arrays.equals(elements, other.elements)) {
+        return false;
+      }
+      // weird equal where size doesn't matter for multimap purposes.
+//      if (size != other.size)
+//        return false;
+      return true;
+    }
+  }
 }
