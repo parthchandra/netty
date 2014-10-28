@@ -405,6 +405,7 @@ abstract class PoolArena<T> {
       PoolThreadCache cache = parent.threadCache.get();
       buf.append("Cached: \n").append(cache.toString()).append("\n");
 
+      /*
       if (!leakedBuffers.isEmpty()) {
         StringBuffer sb = new StringBuffer();
         sb.append("Memory Leak detected: ");
@@ -426,6 +427,7 @@ abstract class PoolArena<T> {
       } else {
         buf.append("All allocated buffers have been released.");
       }
+      */
 
         return buf.toString();
     }

@@ -16,11 +16,16 @@
 
 package io.netty.buffer;
 
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
+
 import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 final class PoolChunk<T> {
+  private static final InternalLogger logger = InternalLoggerFactory.getInstance(PoolChunk.class);
+
     private static final int ST_UNUSED = 0;
     private static final int ST_BRANCH = 1;
     private static final int ST_ALLOCATED = 2;
@@ -110,12 +115,17 @@ final class PoolChunk<T> {
     }
 
     long allocate(int normCapacity) {
+      long handle;
         int firstVal = memoryMap[1];
         if ((normCapacity & subpageOverflowMask) != 0) { // >= pageSize
-            return allocateRun(normCapacity, 1, firstVal);
+            handle = allocateRun(normCapacity, 1, firstVal);
         } else {
-            return allocateSubpage(normCapacity, 1, firstVal);
+            handle = allocateSubpage(normCapacity, 1, firstVal);
         }
+      leakedBuffers.put(handle,
+        new DebugStackTrace(normCapacity, handle, Thread.currentThread().getStackTrace()));
+
+      return handle;
     }
 
     private long allocateRun(int normCapacity, int curIdx, int val) {
@@ -279,6 +289,7 @@ final class PoolChunk<T> {
     }
 
     void free(long handle) {
+        leakedBuffers.remove(handle);
         int memoryMapIdx = (int) handle;
         int bitmapIdx = (int) (handle >>> 32);
 
@@ -378,7 +389,28 @@ final class PoolChunk<T> {
         buf.append('/');
         buf.append(chunkSize);
         buf.append(')');
-        return buf.toString();
+      if (!leakedBuffers.isEmpty()) {
+        StringBuffer sb = new StringBuffer();
+        sb.append("Memory Leak detected: ");
+        sb.append(leakedBuffers.size());
+        sb.append(" buffer(s) still allocated");
+        sb.append("\n");
+        for (DebugStackTrace t : leakedBuffers.values()) {
+          sb.append("\tAllocation of size: ");
+          sb.append(t.size);
+          sb.append(" bytes at stack location:\n");
+          for (StackTraceElement s : t.elements) {
+            sb.append("\t\t");
+            sb.append(s.toString());
+            sb.append("\n");
+          }
+        }
+        buf.append(sb.toString());
+      } else {
+        buf.append("All allocated buffers have been released.");
+      }
+
+      return buf.toString();
     }
 
   public class DebugStackTrace {
